@@ -63,9 +63,15 @@ const extractFactsFromExchange = async (
       ],
     });
 
-    const raw     = completion.choices[0].message.content ?? '{}';
-    const cleaned = raw.replace(/```(?:json)?|```/g, '').trim();
-    return JSON.parse(cleaned);
+    const raw = completion.choices[0].message.content ?? '{}';
+    console.log('[extractFacts] raw model output:', raw);
+
+    // Strip markdown fences, then extract the first {...} block in the response
+    const stripped = raw.replace(/```(?:json)?|```/g, '').trim();
+    const match    = stripped.match(/\{[\s\S]*\}/);
+    const result   = match ? JSON.parse(match[0]) : {};
+    console.log('[extractFacts] parsed:', result);
+    return result;
   } catch {
     return {};
   }
@@ -137,7 +143,8 @@ export const POST = async (req: NextRequest) => {
     }
 
     // ── Step 3: Groq ─────────────────────────────────────────────────────────
-    const systemPrompt = buildSystemPrompt(weatherContext);
+    // Pass profile explicitly — localStorage is unavailable server-side
+    const systemPrompt = buildSystemPrompt(weatherContext, profile);
 
     const completion = await groq.chat.completions.create({
       model:       'llama-3.1-8b-instant',

@@ -40,10 +40,10 @@ export function clearProfile(): void {
 // ─── System Prompt ────────────────────────────────────────────────────────────
 
 // Builds the system prompt that prefixes every Groq request.
-// Injects the user profile so the assistant has cross-session memory.
-// If weather data was fetched, it's included here so GPT can reference it.
-export function buildSystemPrompt(weatherContext?: string): string {
-  const profile    = getProfile();
+// Accepts an explicit profile so it works server-side (where localStorage is unavailable).
+// Falls back to reading localStorage when called from the browser.
+export function buildSystemPrompt(weatherContext?: string, profileOverride?: UserProfile): string {
+  const profile    = profileOverride ?? getProfile();
   const hasProfile = Object.keys(profile).length > 0;
 
   const profileSection = hasProfile
