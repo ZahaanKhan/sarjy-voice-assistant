@@ -173,9 +173,9 @@ const Home = () => {
 
       {error && <p className="error">{error}</p>}
 
-      {profileKeys.length > 0 && (
-        <div className="profile-card">
-          <span className="profile-title">What Sarjy remembers</span>
+      <div className="profile-card">
+        <span className="profile-title">What Sarjy remembers</span>
+        {profileKeys.length > 0 ? (
           <ul className="profile-list">
             {profileKeys.map((key) => (
               <li key={key}>
@@ -184,11 +184,13 @@ const Home = () => {
               </li>
             ))}
           </ul>
-          <button className="reset-btn" onClick={handleReset}>
-            Forget everything
-          </button>
-        </div>
-      )}
+        ) : (
+          <p className="profile-empty">Nothing yet — try saying your name or city.</p>
+        )}
+        <button className="reset-btn" onClick={handleReset} disabled={profileKeys.length === 0}>
+          Forget everything
+        </button>
+      </div>
 
       <p className="footer-note">Works in Chrome only · Uses microphone</p>
     </div>

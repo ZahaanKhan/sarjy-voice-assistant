@@ -122,6 +122,9 @@ body {
   cursor: pointer; transition: border-color 0.15s, color 0.15s;
 }
 .reset-btn:hover { border-color: var(--danger); color: var(--danger); }
+.reset-btn:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
+
+.profile-empty { font-size: 13px; color: var(--muted); font-style: italic; }
 
 /* ── Pipeline ── */
 .pipeline {
