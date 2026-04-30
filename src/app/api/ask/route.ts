@@ -130,9 +130,16 @@ export const POST = async (req: NextRequest) => {
     // instead of two, avoiding rate limit issues in production.
     const systemPrompt = buildSystemPrompt(weatherContext, profile) + `
 
-After your conversational reply, on a new line write exactly:
-FACTS:{"camelCaseKey":"value"}
-Use {} if the user shared no new personal facts. Do not explain the JSON.`;
+IMPORTANT: After every reply, you must output a new line starting with FACTS: followed by a JSON object.
+Extract any personal facts the user shared or updated. Use camelCase keys.
+Examples:
+- "my name is John"                     → FACTS:{"name":"John"}
+- "I live in Austin"                    → FACTS:{"city":"Austin"}
+- "update my location to San Francisco" → FACTS:{"city":"San Francisco"}
+- "my favorite color is blue"           → FACTS:{"favoriteColor":"blue"}
+- "I was born in June"                  → FACTS:{"birthdayMonth":"June"}
+- No new facts shared                   → FACTS:{}
+Only output the FACTS: line — no explanation, no extra text after it.`;
 
     const completion = await groq.chat.completions.create({
       model:       'llama-3.1-8b-instant',
