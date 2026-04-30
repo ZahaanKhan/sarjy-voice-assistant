@@ -39,23 +39,15 @@ const fetchWeatherData = async (city: string) => {
   return res.json();
 };
 
-// Parses facts from the FACTS: delimiter appended to the main Groq reply.
-// Format: "...conversational reply...\nFACTS:{"key":"value"}"
-const parseFactsFromReply = (raw: string): { reply: string; facts: Record<string, string> } => {
-  const delimiter = '\nFACTS:';
-  const idx       = raw.lastIndexOf(delimiter);
-
-  if (idx === -1) return { reply: raw.trim(), facts: {} };
-
-  const reply    = raw.slice(0, idx).trim();
-  const factsRaw = raw.slice(idx + delimiter.length).trim();
-
+// Parses a flat JSON object from a raw model string.
+// Handles markdown fences and extra text around the JSON block.
+const parseJSON = (raw: string): Record<string, string> => {
   try {
-    const match = factsRaw.match(/\{[\s\S]*\}/);
-    const facts = match ? JSON.parse(match[0]) : {};
-    return { reply, facts };
+    const stripped = raw.replace(/```(?:json)?|```/g, '').trim();
+    const match    = stripped.match(/\{[\s\S]*\}/);
+    return match ? JSON.parse(match[0]) : {};
   } catch {
-    return { reply, facts: {} };
+    return {};
   }
 };
 
@@ -124,37 +116,43 @@ export const POST = async (req: NextRequest) => {
       });
     }
 
-    // ── Step 3: Groq ─────────────────────────────────────────────────────────
-    // Pass profile explicitly — localStorage is unavailable server-side.
-    // Ask the model to append a FACTS: line so we get reply + extraction in one call
-    // instead of two, avoiding rate limit issues in production.
-    const systemPrompt = buildSystemPrompt(weatherContext, profile) + `
+    // ── Step 3: Groq — reply + extraction fired in parallel ──────────────────
+    // Running both calls simultaneously means extraction adds zero latency.
+    // Keeping them separate gives extraction a focused prompt Llama can't ignore.
+    const systemPrompt = buildSystemPrompt(weatherContext, profile);
 
-IMPORTANT: After every reply, you must output a new line starting with FACTS: followed by a JSON object.
-Extract any personal facts the user shared or updated. Use camelCase keys.
-Examples:
-- "my name is John"                     → FACTS:{"name":"John"}
-- "I live in Austin"                    → FACTS:{"city":"Austin"}
-- "update my location to San Francisco" → FACTS:{"city":"San Francisco"}
-- "my favorite color is blue"           → FACTS:{"favoriteColor":"blue"}
-- "I was born in June"                  → FACTS:{"birthdayMonth":"June"}
-- No new facts shared                   → FACTS:{}
-Only output the FACTS: line — no explanation, no extra text after it.`;
+    const [replyCompletion, extractCompletion] = await Promise.all([
+      // Main conversational reply
+      groq.chat.completions.create({
+        model:       'llama-3.1-8b-instant',
+        max_tokens:  300,
+        temperature: 0.7,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...history,
+          { role: 'user', content: message },
+        ],
+      }),
+      // Dedicated fact extraction — separate call so it can't be ignored
+      groq.chat.completions.create({
+        model:       'llama-3.1-8b-instant',
+        max_tokens:  120,
+        temperature: 0,
+        messages: [
+          {
+            role:    'system',
+            content: 'You extract personal facts from conversations. Respond with ONLY a JSON object — no explanation, no markdown. Use camelCase keys. Return {} if no personal facts were shared.',
+          },
+          {
+            role:    'user',
+            content: `Extract any new personal facts the user shared.\nUser: "${message}"`,
+          },
+        ],
+      }),
+    ]);
 
-    const completion = await groq.chat.completions.create({
-      model:       'llama-3.1-8b-instant',
-      max_tokens:  400,
-      temperature: 0.7,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        ...history,
-        { role: 'user',   content: message },
-      ],
-    });
-
-    const raw              = completion.choices[0].message.content ?? '';
-    const { reply, facts } = parseFactsFromReply(raw);
-    const newFacts         = facts;
+    const reply    = replyCompletion.choices[0].message.content ?? '';
+    const newFacts = parseJSON(extractCompletion.choices[0].message.content ?? '{}');
 
     pipeline.push({
       id:     'groq',
