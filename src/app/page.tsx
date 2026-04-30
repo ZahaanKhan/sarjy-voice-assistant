@@ -141,7 +141,7 @@ const Home = () => {
   return (
     <div className="app">
       <header className="header">
-        <span className="logo">Sarjy v3</span>
+        <span className="logo">Sarjy v4</span>
         <span className="subtitle">Voice Assistant</span>
       </header>
 
