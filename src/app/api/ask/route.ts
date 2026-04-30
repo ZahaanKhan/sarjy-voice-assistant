@@ -39,41 +39,23 @@ const fetchWeatherData = async (city: string) => {
   return res.json();
 };
 
-// ─── Fact extraction helper ───────────────────────────────────────────────────
+// Parses facts from the FACTS: delimiter appended to the main Groq reply.
+// Format: "...conversational reply...\nFACTS:{"key":"value"}"
+const parseFactsFromReply = (raw: string): { reply: string; facts: Record<string, string> } => {
+  const delimiter = '\nFACTS:';
+  const idx       = raw.lastIndexOf(delimiter);
 
-const extractFactsFromExchange = async (
-  groq:           Groq,
-  userMessage:    string,
-  assistantReply: string,
-): Promise<Record<string, string>> => {
+  if (idx === -1) return { reply: raw.trim(), facts: {} };
+
+  const reply    = raw.slice(0, idx).trim();
+  const factsRaw = raw.slice(idx + delimiter.length).trim();
+
   try {
-    const completion = await groq.chat.completions.create({
-      model:       'llama-3.1-8b-instant',
-      max_tokens:  100,
-      temperature: 0,
-      messages: [
-        {
-          role:    'system',
-          content: 'Extract any new personal facts about the user. Return flat JSON with camelCase keys or {}. Only include facts explicitly stated.',
-        },
-        {
-          role:    'user',
-          content: `User: "${userMessage}"\nAssistant: "${assistantReply}"`,
-        },
-      ],
-    });
-
-    const raw = completion.choices[0].message.content ?? '{}';
-    console.log('[extractFacts] raw model output:', raw);
-
-    // Strip markdown fences, then extract the first {...} block in the response
-    const stripped = raw.replace(/```(?:json)?|```/g, '').trim();
-    const match    = stripped.match(/\{[\s\S]*\}/);
-    const result   = match ? JSON.parse(match[0]) : {};
-    console.log('[extractFacts] parsed:', result);
-    return result;
+    const match = factsRaw.match(/\{[\s\S]*\}/);
+    const facts = match ? JSON.parse(match[0]) : {};
+    return { reply, facts };
   } catch {
-    return {};
+    return { reply, facts: {} };
   }
 };
 
@@ -143,12 +125,18 @@ export const POST = async (req: NextRequest) => {
     }
 
     // ── Step 3: Groq ─────────────────────────────────────────────────────────
-    // Pass profile explicitly — localStorage is unavailable server-side
-    const systemPrompt = buildSystemPrompt(weatherContext, profile);
+    // Pass profile explicitly — localStorage is unavailable server-side.
+    // Ask the model to append a FACTS: line so we get reply + extraction in one call
+    // instead of two, avoiding rate limit issues in production.
+    const systemPrompt = buildSystemPrompt(weatherContext, profile) + `
+
+After your conversational reply, on a new line write exactly:
+FACTS:{"camelCaseKey":"value"}
+Use {} if the user shared no new personal facts. Do not explain the JSON.`;
 
     const completion = await groq.chat.completions.create({
       model:       'llama-3.1-8b-instant',
-      max_tokens:  300,
+      max_tokens:  400,
       temperature: 0.7,
       messages: [
         { role: 'system', content: systemPrompt },
@@ -157,16 +145,16 @@ export const POST = async (req: NextRequest) => {
       ],
     });
 
-    const reply = completion.choices[0].message.content ?? '';
+    const raw              = completion.choices[0].message.content ?? '';
+    const { reply, facts } = parseFactsFromReply(raw);
+    const newFacts         = facts;
+
     pipeline.push({
       id:     'groq',
       label:  'Groq (LLM)',
       status: 'done',
       detail: reply,
     });
-
-    // ── Step 4: Fact extraction (fire alongside response) ────────────────────
-    const newFacts = await extractFactsFromExchange(groq, message, reply);
 
     return NextResponse.json({ reply, pipeline, newFacts });
   } catch (err: unknown) {
