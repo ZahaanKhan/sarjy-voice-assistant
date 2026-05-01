@@ -3,7 +3,7 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title:       'Sarjy — Voice Assistant',
-  description: 'A voice assistant with cross-session memory and live weather data.',
+  description: 'Sarjy — an AI systems design interview coach with guardrails and job posting grounding.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
