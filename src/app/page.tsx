@@ -91,13 +91,13 @@ const Home = () => {
         setStatus('thinking');
 
         try {
-          // Single request — backend handles intent, job lookup, Groq, guardrail
+          // Streaming request — each pipeline step arrives live via onStep
           const history  = getHistory() as Message[];
           const current  = getProfile();
-          const response = await ask(userText, history, current, jobContext);
+          const response = await ask(userText, history, current, jobContext, (step) => {
+            mergeSteps([step]);
+          });
 
-          // Replace pending server steps with the actual results
-          mergeSteps(response.pipeline);
           setReply(response.reply);
 
           // Speak the reply
