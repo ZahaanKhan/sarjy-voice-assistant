@@ -13,22 +13,22 @@ export interface UserProfile {
   [key: string]: string | undefined; // allows any additional fact keys
 }
 
+// Job context fetched from JSearch when the user mentions a company
+export interface JobContext {
+  company:     string;
+  role:        string;
+  description: string;
+}
+
 // The four states the assistant cycles through
 export type AssistantStatus = 'idle' | 'listening' | 'thinking' | 'speaking';
 
-// OpenWeatherMap response shape (only the fields we use)
-export interface WeatherData {
-  name: string;
-  main: { temp: number; humidity: number };
-  weather: Array<{ description: string }>;
-  wind: { speed: number };
-}
-
 // Pipeline step shown in the UI while a request is in flight
+// Known step ids: 'transcript' | 'intent' | 'input-guard' | 'job' | 'groq' | 'guardrail'
 export type StepStatus = 'waiting' | 'running' | 'done' | 'skipped';
 
 export interface PipelineStep {
-  id:      string;
+  id:      'transcript' | 'intent' | 'input-guard' | 'job' | 'groq' | 'guardrail' | string;
   label:   string;
   status:  StepStatus;
   detail?: string;

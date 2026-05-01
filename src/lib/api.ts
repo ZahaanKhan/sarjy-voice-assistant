@@ -1,28 +1,31 @@
 // API CLIENT
 // The frontend has a single function: ask().
-// All orchestration (intent detection, weather, Groq, fact extraction)
+// All orchestration (intent detection, job posting lookup, Groq, guardrail)
 // happens server-side in /api/ask. Adding a new intent never requires
 // a frontend change — just add a branch in the route.
 
-import type { Message, UserProfile, PipelineStep } from '@/lib/types';
+import type { Message, UserProfile, PipelineStep, JobContext } from '@/lib/types';
 
 export interface AskResponse {
-  reply:    string;
-  pipeline: PipelineStep[];
-  newFacts: Record<string, string>;
+  reply:       string;
+  pipeline:    PipelineStep[];
+  newFacts:    Record<string, string>;
+  jobContext:  JobContext | null;
 }
 
 // Send a user message to the orchestrator endpoint.
-// Returns the reply, the full pipeline trace, and any newly extracted facts.
+// Returns the reply, the full pipeline trace, any newly extracted facts,
+// and the job context (if a company was detected this turn).
 export const ask = async (
-  message: string,
-  history: Message[],
-  profile: UserProfile,
+  message:    string,
+  history:    Message[],
+  profile:    UserProfile,
+  jobContext: JobContext | null,
 ): Promise<AskResponse> => {
   const res = await fetch('/api/ask', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ message, history, profile }),
+    body:    JSON.stringify({ message, history, profile, jobContext }),
   });
 
   if (!res.ok) {
@@ -32,19 +35,3 @@ export const ask = async (
 
   return res.json() as Promise<AskResponse>;
 };
-
-// Formats raw OpenWeatherMap JSON into a short readable string.
-// Used by the server-side route to inject weather context into the prompt.
-export const formatWeatherContext = (data: {
-  name: string;
-  main: { temp: number; humidity: number };
-  weather: Array<{ description: string }>;
-  wind: { speed: number };
-}): string =>
-  [
-    `Location:    ${data.name}`,
-    `Temperature: ${Math.round(data.main.temp)}°F`,
-    `Conditions:  ${data.weather[0]?.description ?? 'unknown'}`,
-    `Humidity:    ${data.main.humidity}%`,
-    `Wind:        ${Math.round(data.wind.speed)} mph`,
-  ].join('\n');

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import type { AssistantStatus, Message, PipelineStep } from '@/lib/types';
+import type { AssistantStatus, JobContext, Message, PipelineStep } from '@/lib/types';
 import {
   getHistory, addToHistory,
   getProfile, saveProfile, clearProfile, clearHistory,
@@ -11,22 +11,27 @@ import { speak, stopSpeaking } from '@/lib/voiceOutput';
 import { ask }                 from '@/lib/api';
 import PipelineRow             from '@/components/PipelineRow';
 import MicIcon                 from '@/components/icons/MicIcon';
+import GuardrailsSidebar       from '@/components/GuardrailsSidebar';
 
 // The transcript step is always the first — handled by the browser's Speech API.
-// The remaining three steps are returned by the /api/ask orchestrator.
+// The remaining steps are returned by the /api/ask orchestrator.
 const INITIAL_STEPS: PipelineStep[] = [
-  { id: 'transcript', label: 'Transcribing',      status: 'waiting' },
-  { id: 'intent',     label: 'Intent Detection',  status: 'waiting' },
-  { id: 'weather',    label: 'OpenWeatherMap API', status: 'waiting' },
-  { id: 'groq',       label: 'Groq (LLM)',         status: 'waiting' },
+  { id: 'transcript',  label: 'Transcribing',       status: 'waiting' },
+  { id: 'intent',      label: 'Intent Detection',   status: 'waiting' },
+  { id: 'input-guard', label: 'Input Validator',    status: 'waiting' },
+  { id: 'job',         label: 'JSearch API',         status: 'waiting' },
+  { id: 'groq',        label: 'Groq (LLM)',          status: 'waiting' },
+  { id: 'guardrail',   label: 'Guardrail Validator', status: 'waiting' },
 ];
 
-// While /api/ask is running, show all three server steps as "running"
-// so the user sees immediate feedback even before the response arrives.
+// While /api/ask is running, show all server steps as "running" so the user
+// sees immediate feedback even before the response arrives.
 const PENDING_SERVER_STEPS: PipelineStep[] = [
-  { id: 'intent',  label: 'Intent Detection',  status: 'running' },
-  { id: 'weather', label: 'OpenWeatherMap API', status: 'running' },
-  { id: 'groq',    label: 'Groq (LLM)',         status: 'running' },
+  { id: 'intent',      label: 'Intent Detection',   status: 'running' },
+  { id: 'input-guard', label: 'Input Validator',    status: 'running' },
+  { id: 'job',         label: 'JSearch API',         status: 'running' },
+  { id: 'groq',        label: 'Groq (LLM)',          status: 'running' },
+  { id: 'guardrail',   label: 'Guardrail Validator', status: 'running' },
 ];
 
 const STATUS_LABELS: Record<AssistantStatus, string> = {
@@ -36,13 +41,16 @@ const STATUS_LABELS: Record<AssistantStatus, string> = {
   speaking:  'Speaking — tap to stop',
 };
 
+const OPENING_MESSAGE = "Ready for a new session — which company are you interviewing with?";
+
 const Home = () => {
-  const [status,  setStatus]  = useState<AssistantStatus>('idle');
-  const [steps,   setSteps]   = useState<PipelineStep[]>(INITIAL_STEPS);
-  const [reply,   setReply]   = useState('');
-  const [error,   setError]   = useState('');
+  const [status,     setStatus]     = useState<AssistantStatus>('idle');
+  const [steps,      setSteps]      = useState<PipelineStep[]>(INITIAL_STEPS);
+  const [reply,      setReply]      = useState('');
+  const [error,      setError]      = useState('');
+  const [jobContext, setJobContext]  = useState<JobContext | null>(null);
   // Initialize after mount so localStorage isn't accessed during SSR
-  const [profile, setProfile] = useState<ReturnType<typeof getProfile>>({});
+  const [profile,    setProfile]    = useState<ReturnType<typeof getProfile>>({});
   useEffect(() => { setProfile(getProfile()); }, []);
 
   // Replace steps by id — used to merge server pipeline results into state
@@ -83,10 +91,10 @@ const Home = () => {
         setStatus('thinking');
 
         try {
-          // Single request — backend handles intent, weather, Groq, fact extraction
+          // Single request — backend handles intent, job lookup, Groq, guardrail
           const history  = getHistory() as Message[];
           const current  = getProfile();
-          const response = await ask(userText, history, current);
+          const response = await ask(userText, history, current, jobContext);
 
           // Replace pending server steps with the actual results
           mergeSteps(response.pipeline);
@@ -103,6 +111,11 @@ const Home = () => {
           if (Object.keys(response.newFacts).length > 0) {
             saveProfile(response.newFacts);
             setProfile(getProfile());
+          }
+
+          // Store job context for the rest of this session
+          if (response.jobContext) {
+            setJobContext(response.jobContext);
           }
         } catch (err: unknown) {
           setError(err instanceof Error ? err.message : 'Something went wrong.');
@@ -123,12 +136,31 @@ const Home = () => {
         ));
       },
     );
-  }, [status, mergeSteps]);
+  }, [status, mergeSteps, jobContext]);
+
+  // ─── New Question ────────────────────────────────────────────────────────
+
+  const handleNewQuestion = useCallback(() => {
+    const confirmed = window.confirm('Are you sure? Your current session progress will be lost.');
+    if (!confirmed) return;
+
+    clearHistory();
+    setJobContext(null);
+    setReply('');
+    setError('');
+    setSteps(INITIAL_STEPS);
+    setStatus('speaking');
+    speak(OPENING_MESSAGE, () => setStatus('idle'));
+    setReply(OPENING_MESSAGE);
+  }, []);
+
+  // ─── Reset everything ────────────────────────────────────────────────────
 
   const handleReset = () => {
     clearProfile();
     clearHistory();
     setProfile({});
+    setJobContext(null);
     setSteps(INITIAL_STEPS);
     setReply('');
     setError('');
@@ -139,60 +171,72 @@ const Home = () => {
   const profileKeys    = Object.keys(profile);
 
   return (
-    <div className="app">
-      <header className="header">
-        <span className="logo">Sarjy v5</span>
-        <span className="subtitle">Voice Assistant</span>
-      </header>
+    <div className="page-layout">
+      <div className="app">
+        <header className="header">
+          <span className="logo">Sarjy</span>
+          <span className="subtitle">Systems Design Coach</span>
+        </header>
 
-      <div className="mic-area">
         <button
-          className={`mic-btn mic-btn--${status}`}
-          onClick={handleMicClick}
-          aria-label={STATUS_LABELS[status]}
+          className="new-question-btn"
+          onClick={handleNewQuestion}
+          aria-label="Start a new session"
         >
-          <MicIcon status={status} />
+          New Question
         </button>
-        <p className="status-label">{STATUS_LABELS[status]}</p>
-      </div>
 
-      {anyStepStarted && (
-        <div className="pipeline">
-          {steps.map((step) => (
-            <PipelineRow key={step.id} step={step} />
-          ))}
+        <div className="mic-area">
+          <button
+            className={`mic-btn mic-btn--${status}`}
+            onClick={handleMicClick}
+            aria-label={STATUS_LABELS[status]}
+          >
+            <MicIcon status={status} />
+          </button>
+          <p className="status-label">{STATUS_LABELS[status]}</p>
         </div>
-      )}
 
-      {reply && (
-        <div className="bubble bubble--sarjy">
-          <span className="bubble-label">Sarjy says</span>
-          <p>{reply}</p>
-        </div>
-      )}
-
-      {error && <p className="error">{error}</p>}
-
-      <div className="profile-card">
-        <span className="profile-title">What Sarjy remembers</span>
-        {profileKeys.length > 0 ? (
-          <ul className="profile-list">
-            {profileKeys.map((key) => (
-              <li key={key}>
-                <span className="profile-key">{key}</span>
-                <span className="profile-val">{profile[key]}</span>
-              </li>
+        {anyStepStarted && (
+          <div className="pipeline">
+            {steps.map((step) => (
+              <PipelineRow key={step.id} step={step} />
             ))}
-          </ul>
-        ) : (
-          <p className="profile-empty">Nothing yet — try saying your name or city.</p>
+          </div>
         )}
-        <button className="reset-btn" onClick={handleReset} disabled={profileKeys.length === 0}>
-          Forget everything
-        </button>
+
+        {reply && (
+          <div className="bubble bubble--sarjy">
+            <span className="bubble-label">Sarjy says</span>
+            <p>{reply}</p>
+          </div>
+        )}
+
+        {error && <p className="error">{error}</p>}
+
+        <div className="profile-card">
+          <span className="profile-title">What Sarjy remembers</span>
+          {profileKeys.length > 0 ? (
+            <ul className="profile-list">
+              {profileKeys.map((key) => (
+                <li key={key}>
+                  <span className="profile-key">{key}</span>
+                  <span className="profile-val">{profile[key]}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="profile-empty">Nothing yet — try saying your name.</p>
+          )}
+          <button className="reset-btn" onClick={handleReset} disabled={profileKeys.length === 0}>
+            Forget everything
+          </button>
+        </div>
+
+        <p className="footer-note">Works in Chrome only · Uses microphone</p>
       </div>
 
-      <p className="footer-note">Works in Chrome only · Uses microphone</p>
+      <GuardrailsSidebar />
     </div>
   );
 };
