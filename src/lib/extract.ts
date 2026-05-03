@@ -49,7 +49,12 @@ export const runExtract = async (
   const extracted = parseJSON(completion.choices[0].message.content ?? '{}');
 
   // Pull out routing keys before saving to profile
-  const { _company: detectedCompany, _role: detectedRole, ...personalFacts } = extracted;
+  const { _company: detectedCompany, _role: detectedRole, ...rawFacts } = extracted;
+
+  // Guard against nested objects the LLM occasionally returns — profile values must be strings
+  const personalFacts = Object.fromEntries(
+    Object.entries(rawFacts).filter(([, v]) => typeof v === 'string'),
+  );
 
   return {
     detectedCompany: detectedCompany || undefined,

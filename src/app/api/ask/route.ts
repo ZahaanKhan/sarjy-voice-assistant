@@ -83,7 +83,7 @@ export const POST = async (req: NextRequest) => {
 
         const [extractResult, inputGuardResult] = await Promise.all([
           runExtract(groq, message),
-          runInputGuard(groq, message),
+          runInputGuard(groq, message, history),
         ]);
 
         const { detectedCompany, detectedRole, personalFacts } = extractResult;
@@ -124,7 +124,7 @@ export const POST = async (req: NextRequest) => {
         // System prompt locks in identity, coaching rules, and job context.
         // ══════════════════════════════════════════════════════════════════
 
-        const systemPrompt = buildSystemPrompt(profile, jobContext);
+        const systemPrompt = buildSystemPrompt(profile, jobContext, inputGuardResult.caution);
         const replyResult  = await groq.chat.completions.create({
           model:       'llama-3.1-8b-instant',
           max_tokens:  400,
@@ -151,7 +151,7 @@ export const POST = async (req: NextRequest) => {
         // with a safe fallback — the user never sees the original.
         // ══════════════════════════════════════════════════════════════════
 
-        const outputGuardResult = await runOutputGuard(groq, reply);
+        const outputGuardResult = await runOutputGuard(groq, reply, inputGuardResult.caution);
 
         emitStep({
           id:     'guardrail',
