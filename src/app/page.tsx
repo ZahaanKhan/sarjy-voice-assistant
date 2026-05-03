@@ -70,7 +70,6 @@ const Home = () => {
     }
 
     setError('');
-    setReply('');
     setSteps(INITIAL_STEPS);
     setStatus('listening');
 
