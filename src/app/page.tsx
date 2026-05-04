@@ -168,6 +168,7 @@ const Home = () => {
 
   const anyStepStarted = steps.some(s => s.status !== 'waiting');
   const profileKeys    = Object.keys(profile);
+  const x = 1 // delete
 
   return (
     <div className="page-layout">
