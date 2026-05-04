@@ -57,7 +57,7 @@ const REGEX_RULES: Array<{ pattern: RegExp; category: string }> = [
   { pattern: /act as (a |an )?(different|new|unrestricted|free)/i,    category: 'JAILBREAK' },
   { pattern: /\bDAN\b|\bSTAN\b|\bjailbreak\b/i,                       category: 'JAILBREAK' },
   // Prompt stuffing guard
-  { pattern: /.{6000,}/s,                                             category: 'PROMPT_STUFFING' },
+  { pattern: /[\s\S]{6000,}/,                                          category: 'PROMPT_STUFFING' },
 ];
 
 function regexCheck(message: string): { flagged: boolean; detail: string } {
@@ -143,8 +143,9 @@ function getEmbedder() {
 
 async function embed(text: string): Promise<number[]> {
   const model  = await getEmbedder();
-  const output = await model(text, { pooling: 'mean', normalize: true });
-  return Array.from(output.data as Float32Array);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const output = await (model as any)(text, { pooling: 'mean', normalize: true }) as { data: Float32Array };
+  return Array.from(output.data);
 }
 
 async function getExemplarEmbeddings(): Promise<number[][]> {
